@@ -8,6 +8,8 @@ from web.nodes import make_tree
 
 app = Flask(__name__)
 
+aria2 = ariaAPI(ariaClient(host="http://localhost", port=6800, secret=""))
+
 basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
                     handlers=[FileHandler('log.txt'), StreamHandler()],
                     level=INFO)
@@ -711,7 +713,6 @@ def list_torrent_contents(id_):
         cont = make_tree(res)
         client.auth_log_out()
     else:
-        aria2 = ariaAPI(ariaClient(host="http://localhost", port=6800, secret=""))
         res = aria2.client.get_files(id_)
         cont = make_tree(res, True)
     return page.replace("{My_content}", cont[0]).replace("{form_url}", f"/app/files/{id_}?pin_code={pincode}")
@@ -721,8 +722,8 @@ def set_priority(id_):
 
     data = dict(request.form)
 
+    resume = ""
     if len(id_) > 20:
-        resume = ""
         pause = ""
 
         for i, value in data.items():
@@ -756,7 +757,6 @@ def set_priority(id_):
             LOGGER.error(f"Verification Failed! Hash: {id_}")
         client.auth_log_out()
     else:
-        resume = ""
         for i, value in data.items():
             if "filenode" in i and value == "on":
                 node_no = i.split("_")[-1]
@@ -764,7 +764,6 @@ def set_priority(id_):
 
         resume = resume.strip(",")
 
-        aria2 = ariaAPI(ariaClient(host="http://localhost", port=6800, secret=""))
         res = aria2.client.change_option(id_, {'select-file': resume})
         if res == "OK":
             LOGGER.info(f"Verified! Gid: {id_}")

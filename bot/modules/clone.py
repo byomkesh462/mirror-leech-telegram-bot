@@ -5,18 +5,22 @@ from threading import Thread
 from time import sleep
 
 from bot.helper.mirror_utils.upload_utils.gdriveTools import GoogleDriveHelper
-from bot.helper.telegram_helper.message_utils import sendMessage, sendMarkup, deleteMessage, delete_all_messages, update_all_messages, sendStatusMessage
+from bot.helper.telegram_helper.message_utils import sendMessage, deleteMessage, delete_all_messages, update_all_messages, sendStatusMessage
 from bot.helper.telegram_helper.filters import CustomFilters
 from bot.helper.telegram_helper.bot_commands import BotCommands
 from bot.helper.mirror_utils.status_utils.clone_status import CloneStatus
-from bot import dispatcher, LOGGER, STOP_DUPLICATE, download_dict, download_dict_lock, Interval
+from bot import dispatcher, LOGGER, download_dict, download_dict_lock, Interval, config_dict
 from bot.helper.ext_utils.bot_utils import is_gdrive_link, new_thread
 
 
-def _clone(message, bot, multi=0):
+def _clone(message, bot):
+    if not config_dict['GDRIVE_ID']:
+        sendMessage('GDRIVE_ID not Provided!', bot, message)
+        return
     args = message.text.split()
     reply_to = message.reply_to_message
     link = ''
+    multi = 0
     if len(args) > 1:
         link = args[1].strip()
         if link.strip().isdigit():
@@ -33,25 +37,35 @@ def _clone(message, bot, multi=0):
             tag = f"@{reply_to.from_user.username}"
         else:
             tag = reply_to.from_user.mention_html(reply_to.from_user.first_name)
+
+    def __run_multi():
+        if multi > 1:
+            sleep(4)
+            nextmsg = type('nextmsg', (object, ), {'chat_id': message.chat_id,
+                                                   'message_id': message.reply_to_message.message_id + 1})
+            cmsg = message.text.split()
+            cmsg[1] = f"{multi - 1}"
+            nextmsg = sendMessage(" ".join(cmsg), bot, nextmsg)
+            nextmsg.from_user.id = message.from_user.id
+            sleep(4)
+            Thread(target=_clone, args=(nextmsg, bot)).start()
+
     if is_gdrive_link(link):
         gd = GoogleDriveHelper()
         res, size, name, files = gd.helper(link)
         if res != "":
-            return sendMessage(res, bot, message)
-        if STOP_DUPLICATE:
+            sendMessage(res, bot, message)
+            __run_multi()
+            return
+        if config_dict['STOP_DUPLICATE']:
             LOGGER.info('Checking File/Folder if already in Drive...')
             smsg, button = gd.drive_list(name, True, True)
             if smsg:
-                msg3 = "File/Folder is already available in Drive.\nHere are the search results:"
-                return sendMarkup(msg3, bot, message, button)
-        if multi > 1:
-            sleep(4)
-            nextmsg = type('nextmsg', (object, ), {'chat_id': message.chat_id, 'message_id': message.reply_to_message.message_id + 1})
-            nextmsg = sendMessage(args[0], bot, nextmsg)
-            nextmsg.from_user.id = message.from_user.id
-            multi -= 1
-            sleep(4)
-            Thread(target=_clone, args=(nextmsg, bot, multi)).start()
+                msg = "File/Folder is already available in Drive.\nHere are the search results:"
+                sendMessage(msg, bot, message, button)
+                __run_multi()
+                return
+        __run_multi()
         if files <= 20:
             msg = sendMessage(f"Cloning: <code>{link}</code>", bot, message)
             result, button = gd.clone(link)
@@ -80,14 +94,16 @@ def _clone(message, bot, multi=0):
         if button in ["cancelled", ""]:
             sendMessage(f"{tag} {result}", bot, message)
         else:
-            sendMarkup(result + cc, bot, message, button)
+            sendMessage(result + cc, bot, message, button)
             LOGGER.info(f'Cloning Done: {name}')
     else:
-        sendMessage('Send Gdrive link along with command or by replying to the link by command', bot, message)
+        sendMessage("Send Gdrive link along with command or by replying to the link by command\n\n<b>Multi links only by replying to first link:</b>\n<code>/cmd</code> 10(number of links)", bot, message)
 
 @new_thread
 def cloneNode(update, context):
     _clone(update.message, context.bot)
 
-clone_handler = CommandHandler(BotCommands.CloneCommand, cloneNode, filters=CustomFilters.authorized_chat | CustomFilters.authorized_user, run_async=True)
+clone_handler = CommandHandler(BotCommands.CloneCommand, cloneNode,
+                               filters=CustomFilters.authorized_chat | CustomFilters.authorized_user)
+
 dispatcher.add_handler(clone_handler)
